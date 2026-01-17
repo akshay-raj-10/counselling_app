@@ -3,7 +3,7 @@
 <html>
 <head><title>Add Remark</title></head>
 <body>
-  <h1>Add Remark for {{ booking.student_name }} ({{ booking.slot.date }} {{ booking.session_start }})</h1>
+  <h1>Add Remark for {{ booking.masked_student_name }} ({{ booking.slot.date }} {{ booking.session_start }})</h1>
   <form method="post">{% csrf_token %}
     <p><label>Remark</label><br>
     <textarea name="remark" rows="6" cols="60">{{ booking.counselor_remark }}</textarea></p>

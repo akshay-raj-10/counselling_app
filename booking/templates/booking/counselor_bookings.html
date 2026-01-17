@@ -8,7 +8,7 @@
   {% if bookings %}
     <ul>
       {% for b in bookings %}
-        <li>{{ b.slot.date }} {{ b.session_start }} - {{ b.student_name }} ({{ b.student_email }})</li>
+        <li>{{ b.slot.date }} {{ b.session_start }} - {{ b.masked_student_name }} ({{ b.masked_student_email }})</li>
       {% endfor %}
     </ul>
   {% else %}

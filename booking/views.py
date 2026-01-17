@@ -1,3 +1,8 @@
+# ----------------- Counselor flows -----------------
+from django.contrib.auth.models import Group
+from django.contrib.auth.models import User, Group
+from django.db.models import Count
+from django.contrib.auth.decorators import user_passes_test
 # booking/views.py
 import datetime
 from datetime import time as dtime, timedelta
@@ -8,6 +13,11 @@ from django.contrib.auth.decorators import login_required
 from .forms import CounselorLoginForm, SlotCreateForm, StudentLoginForm, BookingForm
 from .models import Slot, Booking
 from django.contrib import messages
+
+def is_principal(user):
+    return user.is_authenticated and user.groups.filter(name="Principal").exists()
+def principal_required(view_func):
+    return login_required(user_passes_test(is_principal)(view_func))
 
 def home(request):
     return render(request, 'booking/home.html')
@@ -73,7 +83,7 @@ def book_session(request, slot_id, session_start):
             b.slot = slot
             b.session_start = sstart
             # compute session_end (15 minutes later)
-            dt = datetime.datetime.combine(slot.date, sstart) + datetime.timedelta(minutes=15)
+            dt = datetime.datetime.combine(slot.date, sstart) + datetime.timedelta(minutes=60)
             b.session_end = dt.time()
             b.save()
             # update session student fields in case they booked with different name/email
@@ -92,24 +102,39 @@ def book_session(request, slot_id, session_start):
         form = BookingForm(initial=initial)
     return render(request, 'booking/book_session.html', {'form': form, 'slot': slot, 'session_start': sstart})
 
-# ----------------- Counselor flows -----------------
-def counselor_login_view(request):
+
+def unified_login_view(request):
     if request.user.is_authenticated:
-        return redirect('booking:counselor_dashboard')
+        if request.user.groups.filter(name="Principal").exists():
+            return redirect('booking:principal_dashboard')
+        if request.user.groups.filter(name="Counselor").exists():
+            return redirect('booking:counselor_dashboard')
+        logout(request)
+
     if request.method == 'POST':
         form = CounselorLoginForm(data=request.POST)
         if form.is_valid():
             user = form.get_user()
-            login(request, user)
-            return redirect('booking:counselor_dashboard')
+
+            if user.groups.filter(name="Principal").exists():
+                login(request, user)
+                return redirect('booking:principal_dashboard')
+
+            if user.groups.filter(name="Counselor").exists():
+                login(request, user)
+                return redirect('booking:counselor_dashboard')
+
+            messages.error(request, "You are not authorized to access this system.")
     else:
         form = CounselorLoginForm()
-    return render(request, 'booking/counselor_login.html', {'form': form})
+
+    return render(request, 'booking/login.html', {'form': form})
+
 
 @login_required
 def counselor_logout(request):
     logout(request)
-    return redirect('booking:counselor_login')
+    return redirect('booking:login')
 
 @login_required
 def counselor_dashboard(request):
@@ -153,3 +178,102 @@ def add_remark(request, booking_id):
         messages.success(request, "Remark saved.")
         return redirect('booking:counselor_history')
     return render(request, 'booking/add_remark.html', {'booking': booking})
+
+
+def principal_login_view(request):
+    if request.user.is_authenticated and is_principal(request.user):
+        return redirect('booking:principal_dashboard')
+
+    if request.method == 'POST':
+        form = CounselorLoginForm(data=request.POST)  # reuse form
+        if form.is_valid():
+            user = form.get_user()
+
+            if not is_principal(user):
+                messages.error(request, "Not a principal account.")
+                return redirect('booking:principal_login')
+
+            login(request, user)
+            return redirect('booking:principal_dashboard')
+    else:
+        form = CounselorLoginForm()
+
+    return render(request, 'booking/principal_login.html', {'form': form})
+
+
+@principal_required
+def principal_dashboard(request):
+    total_bookings = Booking.objects.count()
+    attended = Booking.objects.filter(attended=True).count()
+    not_attended = total_bookings - attended
+
+    per_counselor = (
+        Booking.objects
+        .values('slot__counselor__username')
+        .annotate(total=Count('id'))
+        .order_by('-total')
+    )
+    counselors = User.objects.filter(groups__name="Counselor")
+
+    return render(request, 'booking/principal_dashboard.html', {
+        'total_bookings': total_bookings,
+        'attended': attended,
+        'not_attended': not_attended,
+        'per_counselor': per_counselor,
+        'counselors': counselors,
+    })
+
+@principal_required
+
+def add_counselor(request):
+    if request.method == 'POST':
+        username = request.POST.get('username', '').strip()
+        password = request.POST.get('password', '').strip()
+
+        if not username or not password:
+            messages.error(request, "All fields are required.")
+            return redirect('booking:add_counselor')
+
+        if User.objects.filter(username=username).exists():
+            messages.error(request, "Username already exists.")
+            return redirect('booking:add_counselor')
+
+        user = User.objects.create_user(
+            username=username,
+            password=password,
+            is_active=True
+        )
+
+        Group.objects.get(name="Counselor").user_set.add(user)
+
+        messages.success(request, "Counselor added successfully.")
+        return redirect('booking:principal_dashboard')
+
+    return render(request, 'booking/add_counselor.html')
+
+
+@principal_required
+def delete_counselor(request, user_id):
+    counselor = get_object_or_404(User, id=user_id)
+
+    # Safety: ensure user is actually a counselor
+    if not counselor.groups.filter(name="Counselor").exists():
+        messages.error(request, "This user is not a counselor.")
+        return redirect('booking:principal_dashboard')
+
+    # Optional safety: prevent deletion if bookings exist
+    has_bookings = Booking.objects.filter(
+        slot__counselor=counselor
+    ).exists()
+
+    if has_bookings:
+        messages.error(
+            request,
+            "Cannot delete counselor with existing bookings."
+        )
+        return redirect('booking:principal_dashboard')
+
+    counselor.delete()
+    messages.success(request, "Counselor deleted successfully.")
+    return redirect('booking:principal_dashboard')
+

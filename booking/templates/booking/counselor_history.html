@@ -9,7 +9,7 @@
     <ul>
       {% for b in bookings %}
         <li>
-          {{ b.slot.date }} {{ b.session_start }} - {{ b.student_name }} -
+          {{ b.slot.date }} {{ b.session_start }} - {{ b.masked_student_name }}-
           Remark: {{ b.counselor_remark|default:"(none)" }}
           - <a href="{% url 'booking:add_remark' b.id %}">Add/Edit remark</a>
         </li>

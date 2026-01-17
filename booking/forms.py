@@ -37,7 +37,7 @@ class SlotCreateForm(forms.ModelForm):
             raise forms.ValidationError("Slot start is in the past. Choose a future date/time.")
 
         def minutes_ok(t):
-            return (t.minute % 15) == 0 and t.second == 0 and t.microsecond == 0
+            return (t.minute % 60) == 0 and t.second == 0 and t.microsecond == 0
 
         if not minutes_ok(start) or not minutes_ok(end):
             raise forms.ValidationError("Start and end times must be aligned to 15-minute increments (e.g. 10:00, 10:15, 10:30).")
